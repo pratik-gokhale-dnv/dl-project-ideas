@@ -4,7 +4,7 @@ Team: 3 people | Duration: about 3 weeks | Hardware: MacBook Pro M4 (MPS/MLX), C
 
 > Link status: only `nuprl/MultiPL-E` was confirmed through the GitHub API while writing this. All other links come from memory of well-known projects. Click through and verify each one (existence, license, language coverage) before relying on it. Training times are estimates. Benchmark your own machine in week 1.
 
-See also: [transcoder-python-js-plan.md](transcoder-python-js-plan.md) (original semester plan).
+See also: [transcoder-python-js-plan.md](transcoder-python-js-plan.md) (original semester plan) and [project-proposal-python-js-code-translation.md](project-proposal-python-js-code-translation.md) (sample course proposal).
 
 ---
 
@@ -206,11 +206,13 @@ Sample about 50 failures per model. Label as: syntax error, wrong API mapping, o
 
 | Week | Person A (Data) | Person B (Modeling) | Person C (Evaluation) |
 |---|---|---|---|
-| 1 | Download XLCoST, CodeNet, Rosetta. Build tree-sitter extraction. First small `train.jsonl` by Wed. | Set up env, benchmark MPS speed, smoke test CodeT5 on 500 pairs. Set up MLX. | Build the Node + Python harness. Load HumanEval-X. Verify canonical solutions pass. |
+| 1 | Download XLCoST, CodeNet, Rosetta. Build tree-sitter extraction. First small `train.jsonl` by Wed. | Set up env, benchmark MPS speed, smoke test CodeT5 on 500 pairs. Set up MLX. | Build the Node + Python execution harness. Load HumanEval-X. Verify canonical solutions pass. |
 | 2 | Finish filtering, dedup, splits, stats. Hand off data mid-week. Optional output-match verification. | Train CodeT5+ both directions. Train Qwen LoRA. Log to W&B. | Few-shot baselines. Wire in BLEU, CodeBLEU, syntax checks. Test the harness on first checkpoints. |
 | 3 | Help with error labelling. Write the data section. | Final runs, optional ablation, produce generations. | Full eval, error taxonomy, plots. All: report, slides, cleanup, README. |
 
 Hard rule: data freezes by mid-week 2. If CodeNet pairing runs late, use XLCoST and Rosetta only.
+
+(The course guidelines require every member to do technical work. Rotate roles so each person trains at least one configuration and contributes to the harness or data pipeline.)
 
 ## 7. Repo layout
 ```
@@ -272,3 +274,114 @@ Tip: to find more, search GitHub for topics such as `code-translation`, `program
 3. XLCoST dataset README.
 4. MultiPL-E README (to learn how its harness runs JS tests).
 5. mlx-lm LORA.md.
+
+---
+
+## 11. Proposed problem statements (aligned with the course guidelines)
+
+The course guidelines (section 1.1) say a project must investigate deep learning architectures or learning methods, not just run a pretrained model. Each statement below names a DL question, a dataset, a method and an evaluation.
+
+| Option | Problem statement | Main DL angle | Risk |
+|---|---|---|---|
+| **A (recommended)** | How do architecture and adaptation choices affect Python <-> JS translation? Compare CodeT5+ 220M (encoder-decoder, full fine-tune) with Qwen2.5-Coder 0.5B (decoder-only, LoRA). Ablate LoRA rank (4, 8, 16, 32) and which layers get adapters (attention only vs attention + MLP). | Architecture, parameter-efficient adaptation | Low-moderate |
+| **B** | How much parallel data is needed before fine-tuning beats few-shot prompting, and does the model generalize to unseen problem types? Train on 1%, 5%, 10%, 50%, 100% of the data. | Data efficiency, generalization, learning curves | Low |
+| **C** | Semantic-gap augmentation: does adding training examples for Python/JS differences (integer division, negative indexing, default sort, equality) fix the failures that dominate the error analysis? | Targeted augmentation, per-category analysis | Moderate |
+| **D** | Does training on output-verified pairs (CodeNet pairs whose outputs match on shared inputs) beat training on unverified pairs? | Data quality vs quantity | Moderate-high (needs a working sandbox early) |
+| **E** | How do loss and decoding choices (cross-entropy vs label smoothing; greedy, beam, sampling) change syntax validity and functional correctness? | Objective and decoding | Low value alone; use as an add-on |
+
+**Recommendation:** Option A plus the data-size ablation from Option B. It gives a clear architectural comparison, adaptation ablations and learning curves, and it lets each team member own a technical piece (CodeT5+ training, LoRA ablations, harness and analysis).
+
+Hypotheses to state in the report (examples):
+- H1: Encoder-decoder CodeT5+ at 220M matches or beats a 0.5B decoder-only LoRA model on XLCoST text metrics because it is pretrained for code-to-code tasks, but the larger decoder-only model wins on execution accuracy for HumanEval-X because of its broader pretraining.
+- H2: LoRA performance saturates at a small rank (about 8 to 16); higher ranks add cost without gains.
+- H3: Adapting MLP layers in addition to attention helps on idiom-heavy cases (API mapping), not on syntax.
+- H4: Fine-tuning beats few-shot prompting only beyond some data size, and the crossover point can be read from the learning curve.
+
+## 12. How the evaluation will work in detail
+
+### 12.1 What we are targeting
+We want to know how well a small fine-tuned model translates a Python function to JavaScript and back, and why it succeeds or fails. We use two kinds of data for two different questions:
+
+| Question | Data | Metric |
+|---|---|---|
+| Does the translated code look like the reference? (comparable to published baselines) | XLCoST test split, Python <-> JavaScript | BLEU, CodeBLEU, exact match |
+| Does the translated code actually work? | HumanEval-X / MultiPL-E (164 problems with unit tests) | pass@1, syntax validity |
+| Does it generalize to problems it never saw? | Problem-level held-out split of our own data (plus optional CodeNet pairs with verified outputs) | pass@1 or output-match rate |
+| Why does it fail? | Failed translations from the runs above | Manual error taxonomy |
+
+### 12.2 Using XLCoST (https://github.com/reddy-lab-code-research/XLCoST)
+What the repository provides, based on its README:
+- Parallel data in 7 languages, including Python and JavaScript, at two levels: **snippet-level** (short fragments, about 23 tokens on average) and **program-level** (whole programs, about 185 to 215 tokens on average).
+- Python-JS counts (from the README tables): snippet pairs about 67K train / 3.7K val / 6.9K test (Python -> JS direction table) and program pairs about 8.2K train / 0.5K val / 0.9K test.
+- Data download is a Google Drive link in the README. The translation files are in `pair_data_tok_1` (snippet translation) and `pair_data_tok_full` (program translation).
+- Training and evaluation code is adapted from CodeXGLUE and PLBART, so we can reuse its data format and scoring approach.
+- Published baselines are Naive Copy, CodeBERT, PLBART and CodeT5 with CodeBLEU scores. The README has these tables commented out, so check the paper (https://arxiv.org/abs/2206.08474) before quoting numbers. In the commented tables, CodeT5 snippet-level CodeBLEU for Python -> JS is about 77.8 and for JS -> Python about 73.2.
+
+How we use it:
+1. **Training data** for both models (the snippet and program splits are already separated into train/val/test).
+2. **Reproduction check:** fine-tune CodeT5 on the XLCoST Python-JS pairs and confirm our CodeBLEU is close to the published number. This validates our pipeline before we add our own experiments.
+3. **Naive Copy baseline:** copying the source unchanged gives a floor for CodeBLEU, which shows how much of the score comes from shared syntax.
+4. **Limits:** XLCoST snippets have no unit tests, so we only measure text similarity on them. Many snippets are fragments, not complete functions. We therefore never claim functional correctness from XLCoST alone.
+
+### 12.3 Using Project CodeNet (https://github.com/IBM/Project_CodeNet)
+What the repository provides, based on its README:
+- 13.9M submissions to 4,053 problems in 50+ languages. About 53.6% of submissions are marked Accepted.
+- Layout: `data/<problem_id>/<Language>/<submission_id>.<ext>`, for example `data/p00001/JavaScript/s300682070.js`. Metadata is in `metadata/<problem_id>.csv` with fields `language`, `status`, `cpu_time`, `accuracy` and others.
+- `derived/` has sample input/output for each problem, near-duplicate information and benchmarks. Tools for tokenizing, AST generation and graph building are in `tools/`.
+- Download is about 7.8 GB: https://codait-cos-dax.s3.us.cloud-object-storage.appdomain.cloud/dax-project-codenet/1.0.0/Project_CodeNet.tar.gz
+- The Python800 benchmark is included, but it is for classification, not translation.
+
+How we use it:
+1. **Pair building:** for each problem that has both a Python and a JavaScript submission with status `Accepted`, pair the two solutions. Split train/val/test **by problem id** so no problem appears in two splits.
+2. **Output-match verification (optional, data-quality experiment):** run both solutions on the sample inputs in `derived/` and keep only pairs whose outputs match. This yields pairs that are functionally equivalent.
+3. **Held-out functional test:** for test-split problems, translate the Python solution to JavaScript, run it on the sample inputs, and compare its output with the expected output (match rate = functional accuracy on CodeNet).
+4. **Limits:** most solutions are whole programs that read stdin and print to stdout, not standalone functions. We expect to extract only a subset as functions, or wrap stdin/stdout with a small harness. Sample I/O is also small, so a pass is weaker evidence than HumanEval-X's unit tests. Competitive-programming style is not typical of production code. Check the license and the anonymization notes before use.
+
+### 12.4 Evaluation procedure (step by step)
+1. **Freeze the splits:** train/val/test by problem. Run near-duplicate detection between train and HumanEval-X prompts and remove matches.
+2. **Validate the harness** by running the Python and JS canonical solutions from HumanEval-X through it. All 164 must pass before any model output is scored.
+3. **Generate outputs:** greedy decoding, fixed max length, same prompt template per model. Save raw generations to disk so scoring can be re-run.
+4. **Score:**
+   - Parse each output with tree-sitter (syntax validity).
+   - Run each output against the unit tests in the Docker sandbox (no network, timeout 10 s, memory limit). Count pass or fail (pass@1).
+   - Compute BLEU (`sacrebleu`) and CodeBLEU (`codebleu`) against the references on the XLCoST test split.
+5. **Report per direction** (Py -> JS and JS -> Py) and per configuration.
+6. **Uncertainty:** with 164 problems, one problem is about 0.6 percentage points. Report counts, bootstrap confidence intervals, and do not over-read differences smaller than a few points. If budget allows, run 2 to 3 seeds for the main configurations.
+7. **Training diagnostics (required for the report):** training loss and validation loss per epoch, validation pass@1 per epoch, and the generalization gap, to discuss overfitting.
+8. **Error analysis:** sample about 50 failures per main model, label each with one category (syntax error, wrong API mapping, off-by-one or negative indexing, integer vs float division, type coercion or equality, string/array method mismatch, sort default, missing import or helper, other), and report counts per category and per model.
+
+### 12.5 How we will grade the models
+
+| Layer | What we report | How we use it |
+|---|---|---|
+| Headline | pass@1 on HumanEval-X, per direction | Main comparison between configurations |
+| Sanity | Syntax validity rate | Separates "can't write valid code" from "writes valid but wrong code" |
+| Comparability | BLEU and CodeBLEU on XLCoST, versus the published CodeT5/PLBART/CodeBERT and Naive Copy numbers | Checks our pipeline against prior work |
+| Training behavior | Loss curves, generalization gap, per-epoch pass@1 | Overfitting analysis |
+| Ablation | Rank, target modules, data size, full fine-tune vs LoRA | Tests hypotheses H1 to H4 |
+| Diagnosis | Error taxonomy counts | Explains why models fail |
+
+Expected report tables:
+
+| Model | Adaptation | Direction | Syntax valid % | pass@1 | CodeBLEU (XLCoST) | BLEU (XLCoST) |
+|---|---|---|---|---|---|---|
+| Naive copy | none | Py->JS | | | | |
+| Qwen 0.5B few-shot | none | Py->JS | | | | |
+| Qwen 0.5B | LoRA r=8 | Py->JS | | | | |
+| CodeT5+ 220M | full fine-tune | Py->JS | | | | |
+| (same rows) | | JS->Py | | | | |
+
+| LoRA rank | Target modules | Trainable params | pass@1 | Val loss |
+|---|---|---|---|---|
+| 4 / 8 / 16 / 32 | attention only; attention + MLP | | | |
+
+| Training data | pass@1 (fine-tuned) | pass@1 (few-shot baseline) |
+|---|---|---|
+| 10% / 50% / 100% | | |
+
+### 12.6 Known evaluation limitations (state these in the report)
+- HumanEval-X problems are short and may appear in pretraining data (contamination). Pretrained models may score higher than their translation ability alone would explain.
+- XLCoST measures text similarity only. CodeBLEU does not guarantee correct behavior.
+- CodeNet sample I/O is a weak test, and programs are stdin/stdout oriented.
+- Translating a canonical solution tests function-level translation of simple algorithms, not idiomatic translation of real projects.
+- Small test sets mean noisy comparisons. Use confidence intervals.
